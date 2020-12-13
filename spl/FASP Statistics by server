@@ -1,0 +1,169 @@
+index="aspera" (tag::host="aspera" tag::host="outbound" sourcetype=aspera_es) "FASP Session Statistics"
+
+| rex "(?P<hostname>\S+)\s+(?P<process>\w+)\[(?P<pid>\d+)\]:\s+(?P<asp_FASP_payload>LOG .*)$"
+| eval message = if( isnull(message), asp_FASP_payload, message)
+
+| rename COMMENT AS "Sep  9 09:45:45 bvl-mit-aspcon3 ascp[26192]: LOG FASP Session Statistics [Receiver] id=c3ac126b-2a9d-45b3-9ac7-4774e6013a1c delay=3ms rex_delay=8ms ooo_delay=8ms solicited_rex=0.00% rcvd_rex=0.00% rcvd_dups=0.00% ave_xmit_rate 99.55Mbps effective=99.95% effective_rate=99.51Mbps (detail: good_blks 2139 bl_total 2140 bl_orig 2139 bl_rex 0 dup_blks 0 dup_last_blks 0 drop_blks_xnf 1) (sndr ctl: sent 20 rcvd 19 lost 1 lost 5.00%) (rcvr ctl: sent 37 rcvd 37 lost 0 lost 0.00%) (rex  ctl: sent 0 rcvd 0 lost 0 lost 0.00%) (progress: tx_bytes 3011606 file_bytes 3011606 tx_time 250219) rex_xmit_blks 0  xmit_total 2140 rex_xmit_pct 0.00%"
+
+| eval asp_fx_errors=0
+
+| rex field=message "^(?P<asp_log_type>LOG FASP Session Statistics \[(?P<asp_role>[^\]]+)\])\s+(?P<asp_FASP_payload>.*)$"
+
+| rex field=message "ave_xmit_rate\s+(?P<avg_xmit_rate>\S+)\s"
+| rex field=delay "^(?<delay_int>-?\d+)\s*(?P<delay_unit>\S+)$"
+| eval asp_fx_errors = asp_fx_errors + if(isnull(delay_int), 1, 0) + if(isnull(delay_unit), 1, 0)
+| rex field=rex_delay "^(?<rex_delay_int>-?\d+)\s*(?P<rex_delay_unit>\S+)$"
+| eval asp_fx_errors = asp_fx_errors + if(isnull(rex_delay_int), 1, 0) + if(isnull(rex_delay_unit), 1, 0)
+
+| rename COMMENT AS "**** DETAIL BLOCK ***"
+| rex field=message "\(detail: (?P<asp_detail_msg>[^\)]+?)\)"
+| rex field=asp_detail_msg "good_blks (?P<detail_good_blks>\d+)"
+| rex field=asp_detail_msg "bl_total (?P<detail_bl_total>\d+)"
+| rex field=asp_detail_msg "bl_orig (?P<detail_bl_orig>\d+)"
+| rex field=asp_detail_msg "bl_rex (?P<detail_bl_rex>\d+)"
+| rex field=asp_detail_msg "dup_blks (?P<detail_dup_blks>\d+)"
+| rex field=asp_detail_msg "dup_last_blks (?P<detail_dup_last_blks>\d+)"
+| rex field=asp_detail_msg "drop_blks_xnf (?P<detail_drop_blks_xnf>\d+)"
+
+
+| rename COMMENT AS "(detail: good_blks 2139 bl_total 2140 bl_orig 2139 bl_rex 0 dup_blks 0 dup_last_blks 0 drop_blks_xnf 1) (sndr ctl: sent 20 rcvd 19 lost 1 lost 5.00%) (rcvr ctl: sent 37 rcvd 37 lost 0 lost 0.00%) (rex  ctl: sent 0 rcvd 0 lost 0 lost 0.00%) (progress: tx_bytes 3011606 file_bytes 3011606 tx_time 250219) rex_xmit_blks 0  xmit_total 2140 rex_xmit_pct 0.00%"
+
+| eval asp_detail_fx_errors = if(isnull(asp_detail_msg), 1, 0)
+                            + if(isnull(detail_good_blks), 2, 0)
+                            + if(isnull(detail_bl_total), 4, 0)
+                            + if(isnull(detail_bl_orig), 8, 0)
+                            + if(isnull(detail_bl_rex), 16, 0)
+                            + if(isnull(detail_dup_last_blks), 32, 0)
+
+
+  | eval detail_rex_ratio = if ( detail_bl_orig == 0, 0, detail_bl_rex / detail_bl_orig * 100)
+  | eval detail_vldtr_blocks_total = detail_bl_orig + detail_bl_rex - detail_bl_total
+  | eval detail_vldtr_blocks_good  = detail_bl_orig - detail_dup_last_blks - detail_good_blks
+  | eval detail_vldtr_blocks  = detail_vldtr_blocks_total + detail_vldtr_blocks_good
+
+
+
+| rex field=message "\(sndr ctl: (?P<asp_sndr_ctl_msg>(sent (?P<sndr_ctl_sent>\d+) rcvd (?P<sndr_ctl_rcvd>\d+) lost (?P<sndr_ctl_lost>-?\d+) lost (?P<sndr_ctl_lost_pct>-?\d+\.?\d*)\%)|[^\)]+)\)"
+| eval asp_sndr_ctl_fx_errors = if(isnull(asp_sndr_ctl_msg), 1, 0)
+                              + if(isnull(sndr_ctl_sent), 2, 0)
+                              + if(isnull(sndr_ctl_rcvd), 4, 0)
+                              + if(isnull(sndr_ctl_lost), 8, 0)
+                              + if(isnull(sndr_ctl_lost_pct), 16, 0)
+
+| rex field=message "\(rcvr ctl: (?P<asp_rcvr_ctl_msg>(sent (?P<rcvr_ctl_sent>\d+) rcvd (?P<rcvr_ctl_rcvd>\d+) lost (?P<rcvr_ctl_lost>-?\d+) lost (?P<rcvr_ctl_lost_pct>-?\d+\.?\d*)\%)|[^\)]+)\)"
+| eval asp_rcvr_ctl_fx_errors = if(isnull(asp_rcvr_ctl_msg), 1, 0)
+                              + if(isnull(rcvr_ctl_sent), 2, 0)
+                              + if(isnull(rcvr_ctl_rcvd), 4, 0)
+                              + if(isnull(rcvr_ctl_lost), 8, 0)
+                              + if(isnull(rcvr_ctl_lost_pct), 16, 0)
+
+| rex field=message "\(rex\s+ctl: (?P<asp_rex_ctl_msg>(sent (?P<rex_ctl_sent>\d+) rcvd (?P<rex_ctl_rcvd>\d+) lost (?P<rex_ctl_lost>-?\d+) lost (?P<rex_ctl_lost_pct>-?\d+\.?\d*)\%)|[^\)]+)\)"
+| eval asp_rex_ctl_fx_errors  = if(isnull(asp_rex_ctl_msg), 1, 0)
+                              + if(isnull(rex_ctl_sent), 2, 0)
+                              + if(isnull(rex_ctl_rcvd), 4, 0)
+                              + if(isnull(rex_ctl_lost), 8, 0)
+                              + if(isnull(rex_ctl_lost_pct), 16, 0)
+
+| rename COMMENT AS "**** PROGRESS BLOCK ***"
+| rex field=message "\(progress: (?P<asp_progress_msg>[^\)]+?)\)"
+| rex field=asp_progress_msg "tx_bytes (?P<progress_tx_bytes>\d+)"
+| rex field=asp_progress_msg "file_bytes (?P<progress_file_bytes>\d+)"
+| rex field=asp_progress_msg "tx_time (?P<progress_tx_time>\d+)"
+
+| eval asp_progress_fx_errors  = if(isnull(asp_progress_msg), 1, 0)
+                               + if(isnull(progress_tx_bytes), 2, 0)
+                               + if(isnull(progress_file_bytes), 4, 0)
+                               + if(isnull(progress_tx_time), 8, 0)
+
+  | eval progress_tx_time_sec = progress_tx_time / 1000000
+
+
+| rename COMMENT AS "Add'l data; sample: rex_xmit_blks 0  xmit_total 2140 rex_xmit_pct 0.00%"
+| rex field=message "rex_xmit_blks (?P<stats_rex_xmit_blks>\d+)"
+| rex field=message "xmit_total (?P<stats_xmit_total>\d+)"
+| rex field=message "rex_xmit_pct (?P<stats_rex_xmit_pct>-?\d+\.?\d*)"
+
+
+| rex field=message "\(estimate transfer size:\s+(?P<asp_est_trn_size>\d+)\s+bytes\)"
+| rex field=message "sess-\>instru\.num_rex_xfer_not_found\s+(?P<asp_num_rex_xfer_not_found>\d+)"
+| rex field=message "sess-\>instru\.num_rex_abrtxfer_not_found\s+(?P<asp_num_rex_abrtxfer_not_found>\d+)"
+
+| eval asp_fx_errors = asp_fx_errors + asp_detail_fx_errors + asp_sndr_ctl_fx_errors + asp_rcvr_ctl_fx_errors + asp_rex_ctl_fx_errors + asp_progress_fx_errors
+                     + if(isnull(asp_est_trn_size), 1, 0)
+                     + if(isnull(asp_num_rex_xfer_not_found), 1, 0)
+                     + if(isnull(asp_num_rex_abrtxfer_not_found), 1, 0)
+
+
+| stats sparkline AS timeline count AS events
+        dc(id) AS "Session IDs",
+        dc(delay_unit),
+        avg(delay_int), max(delay_int),
+        dc(rex_delay_unit),
+        avg(rex_delay_int), max(rex_delay_int),
+        
+        avg(progress_tx_bytes) AS "avg progress tx bytes", min(progress_tx_bytes) AS "min progress tx bytes", max(progress_tx_bytes) AS "max progress tx bytes",
+        sum(progress_tx_bytes) AS "total progress tx bytes", sparkline(sum(progress_tx_bytes)) AS "total progress tx bytes timeline"
+        avg(progress_file_bytes) AS "avg progress file bytes", min(progress_file_bytes) AS "min progress file bytes", max(progress_file_bytes) AS "max progress file bytes",
+        sum(progress_file_bytes) AS "total progress file bytes",
+        avg(progress_tx_time_sec) AS "avg progress tx time", min(progress_tx_time_sec) AS "min progress tx time", max(progress_tx_time_sec) AS "max progress tx time", sum(progress_tx_time_sec) AS "total progress tx time",
+
+        avg(detail_good_blks) AS "avg good data blocks", min(detail_good_blks) AS "min good data blocks", max(detail_good_blks) AS "max good data blocks", sum(detail_good_blks) AS "sum of good data blocks",
+        avg(detail_bl_total) AS "avg total data blocks", min(detail_bl_total) AS "min total data blocks", max(detail_bl_total) AS "max total data blocks", sum(detail_bl_total) AS "sum of total data blocks",
+        avg(detail_bl_orig) AS "avg original data blocks", min(detail_bl_orig) AS "min original data blocks", max(detail_bl_orig) AS "max original data blocks", sum(detail_bl_orig) AS "sum of original data blocks",
+        avg(detail_bl_rex) AS "avg retransmitted data blocks", min(detail_bl_rex) AS "min retransmitted data blocks", max(detail_bl_rex) AS "max retransmitted data blocks", sum(detail_bl_rex) AS "sum of retransmitted data blocks",
+
+        avg(detail_dup_blks) AS "avg duplicate blocks", min(detail_dup_blks) AS "min duplicate blocks", max(detail_dup_blks) AS "max duplicate blocks", sum(detail_dup_blks) AS "sum of duplicate blocks",
+        
+        avg(detail_dup_last_blks) AS "avg duplicate last blocks", min(detail_dup_last_blks) AS "min duplicate last blocks", max(detail_dup_last_blks) AS "max duplicate last blocks", sum(detail_dup_last_blks) AS "sum of duplicate last blocks",
+        avg(detail_drop_blks_xnf) AS "avg drop_blks_xnf", min(detail_drop_blks_xnf) AS "min drop_blks_xnf", max(detail_drop_blks_xnf) AS "max drop_blks_xnf", sum(detail_drop_blks_xnf) AS "sum of drop_blks_xnf",
+        
+        avg(detail_rex_ratio) AS "avg retransmission ratio", min(detail_rex_ratio) AS "min retransmission ratio", max(detail_rex_ratio) AS "max retransmission ratio",
+        sum(detail_vldtr_blocks) AS "validator (should be zero)"
+
+
+        avg(sndr_ctl_sent) AS "avg sender ctl sent", min(sndr_ctl_sent) AS "min sender ctl sent", max(sndr_ctl_sent) AS "max sender ctl sent", sum(sndr_ctl_sent) AS "total sender ctl sent",
+        avg(sndr_ctl_rcvd) AS "avg sender ctl rcvd", min(sndr_ctl_rcvd) AS "min sender ctl rcvd", max(sndr_ctl_rcvd) AS "max sender ctl rcvd", sum(sndr_ctl_rcvd) AS "total sender ctl rcvd",
+        avg(sndr_ctl_lost) AS "avg sender ctl lost", min(sndr_ctl_lost) AS "min sender ctl lost", max(sndr_ctl_lost) AS "max sender ctl lost", sum(sndr_ctl_lost) AS "total sender ctl lost",
+        avg(sndr_ctl_lost_pct) AS "avg sender ctl lost percent", min(sndr_ctl_lost_pct) AS "min sender ctl lost percent", max(sndr_ctl_lost_pct) AS "max sender ctl lost percent",
+
+        avg(rcvr_ctl_sent) AS "avg rcvr ctl sent", min(rcvr_ctl_sent) AS "min rcvr ctl sent", max(rcvr_ctl_sent) AS "max rcvr ctl sent", sum(rcvr_ctl_sent) AS "total rcvr ctl sent",
+        avg(rcvr_ctl_rcvd) AS "avg rcvr ctl rcvd", min(rcvr_ctl_rcvd) AS "min rcvr ctl rcvd", max(rcvr_ctl_rcvd) AS "max rcvr ctl rcvd", sum(rcvr_ctl_rcvd) AS "total rcvr ctl rcvd",
+        avg(rcvr_ctl_lost) AS "avg rcvr ctl lost", min(rcvr_ctl_lost) AS "min rcvr ctl lost", max(rcvr_ctl_lost) AS "max rcvr ctl lost", sum(rcvr_ctl_lost) AS "total rcvr ctl lost",
+        avg(rcvr_ctl_lost_pct) AS "avg rcvr ctl lost percent", min(rcvr_ctl_lost_pct) AS "min rcvr ctl lost percent", max(rcvr_ctl_lost_pct) AS "max rcvr ctl lost percent",
+
+        avg(rex_ctl_sent) AS "avg rex ctl sent", min(rex_ctl_sent) AS "min rex ctl sent", max(rex_ctl_sent) AS "max rex ctl sent", sum(rex_ctl_sent) AS "total rex ctl sent",
+        avg(rex_ctl_rcvd) AS "avg rex ctl rcvd", min(rex_ctl_rcvd) AS "min rex ctl rcvd", max(rex_ctl_rcvd) AS "max rex ctl rcvd", sum(rex_ctl_rcvd) AS "total rex ctl rcvd",
+        avg(rex_ctl_lost) AS "avg rex ctl lost", min(rex_ctl_lost) AS "min rex ctl lost", max(rex_ctl_lost) AS "max rex ctl lost", sum(rex_ctl_lost) AS "total rex ctl lost",
+        avg(rex_ctl_lost_pct) AS "avg rex ctl lost percent", min(rex_ctl_lost_pct) AS "min rex ctl lost percent", max(rex_ctl_lost_pct) AS "max rex ctl lost percent",
+
+        avg(asp_est_trn_size) AS "avg estimated transfer size", min(asp_est_trn_size) AS "min estimated transfer size", max(asp_est_trn_size) AS "max estimated transfer size"
+
+        avg(stats_rex_xmit_blks) AS "avg stats_rex_xmit_blks", min(stats_rex_xmit_blks) AS "min stats_rex_xmit_blks", max(stats_rex_xmit_blks) AS "max stats_rex_xmit_blks", sum(stats_rex_xmit_blks) AS "sum stats_rex_xmit_blks"
+        avg(stats_xmit_total) AS "avg stats_xmit_total", min(stats_xmit_total) AS "min stats_xmit_total", max(stats_xmit_total) AS "max stats_xmit_total", sum(stats_xmit_total) AS "sum stats_xmit_total"
+        avg(stats_rex_xmit_pct) AS "avg stats_rex_xmit_pct", min(stats_rex_xmit_pct) AS "min stats_rex_xmit_pct", max(stats_rex_xmit_pct) AS "max stats_rex_xmit_pct"
+
+
+
+        sum(asp_fx_errors) AS "field extraction errors"
+        by host, asp_role |  eval "avg data blocks (millions)" = 'avg total data blocks' / 1000000
+| eval "retransmission ratio" = if ( 'avg original data blocks' == 0, 0, 'avg retransmitted data blocks' / 'avg original data blocks' * 100)
+| eval GBph = if('total progress tx time' == 0, 0, ('total progress tx bytes' / (1024*1024*1024)) / ('total progress tx time' / (60*60)))
+| eval "total GB" = 'total progress tx bytes' / (1024*1024*1024)
+| eval "avg GB" = 'avg progress tx bytes' / (1024*1024*1024)
+
+| eventstats sum(GBph) AS sum_GBph
+| eval GBph_pct = if (sum_GBph==0, 0, GBph / sum_GBph * 100)
+
+| table host asp_role timeline events "avg GB"
+    "avg total data blocks",
+    "avg original data blocks",
+    "avg retransmitted data blocks",
+    "retransmission ratio"
+    GBph GBph_pct
+| rename "sum of total data blocks" AS "total data blocks"
+| rename "avg total data blocks" AS "avg total data blocks"
+| rename "sum of original data blocks" AS "original data blocks"
+| rename "avg retransmitted data blocks" AS "avg retransmitted data blocks"
+| rename GBph AS "GB/h"
+| rename GBph_pct AS "GB/h %"
+| rename asp_role AS role
