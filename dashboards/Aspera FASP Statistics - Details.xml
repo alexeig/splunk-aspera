@@ -1,0 +1,1272 @@
+<form>
+  <label>Aspera FASP Statistics - Details</label>
+  <description>(periods 4 hours or longer produce more accurate results)</description>
+  <search id="aspera_fasp_stats">
+    <query>$hosts$ "FASP Session Statistics"
+
+| rex "(?P&lt;hostname&gt;\S+)\s+(?P&lt;process&gt;\w+)\[(?P&lt;pid&gt;\d+)\]:\s+(?P&lt;asp_FASP_payload&gt;LOG .*)$$"
+| eval message = if( isnull(message), asp_FASP_payload, message)
+
+| rename COMMENT AS "Sep  9 09:45:45 bvl-mit-aspcon3 ascp[26192]: LOG FASP Session Statistics [Receiver] id=c3ac126b-2a9d-45b3-9ac7-4774e6013a1c delay=3ms rex_delay=8ms ooo_delay=8ms solicited_rex=0.00% rcvd_rex=0.00% rcvd_dups=0.00% ave_xmit_rate 99.55Mbps effective=99.95% effective_rate=99.51Mbps (detail: good_blks 2139 bl_total 2140 bl_orig 2139 bl_rex 0 dup_blks 0 dup_last_blks 0 drop_blks_xnf 1) (sndr ctl: sent 20 rcvd 19 lost 1 lost 5.00%) (rcvr ctl: sent 37 rcvd 37 lost 0 lost 0.00%) (rex  ctl: sent 0 rcvd 0 lost 0 lost 0.00%) (progress: tx_bytes 3011606 file_bytes 3011606 tx_time 250219) rex_xmit_blks 0  xmit_total 2140 rex_xmit_pct 0.00%"
+
+| eval asp_fx_errors=0
+
+| rex field=message "^(?P&lt;asp_log_type&gt;LOG FASP Session Statistics \[(?P&lt;asp_role&gt;[^\]]+)\])\s+(?P&lt;asp_FASP_payload&gt;.*)$$"
+
+| rex field=message "ave_xmit_rate\s+(?P&lt;avg_xmit_rate&gt;\S+)\s"
+| rex field=delay "^(?&lt;delay_int&gt;-?\d+)\s*(?P&lt;delay_unit&gt;\S+)$$"
+| eval asp_fx_errors = asp_fx_errors + if(isnull(delay_int), 1, 0) + if(isnull(delay_unit), 1, 0)
+| rex field=rex_delay "^(?&lt;rex_delay_int&gt;-?\d+)\s*(?P&lt;rex_delay_unit&gt;\S+)$$"
+| eval asp_fx_errors = asp_fx_errors + if(isnull(rex_delay_int), 1, 0) + if(isnull(rex_delay_unit), 1, 0)
+
+| rename COMMENT AS "**** DETAIL BLOCK ***"
+| rex field=message "\(detail: (?P&lt;asp_detail_msg&gt;[^\)]+?)\)"
+| rex field=asp_detail_msg "good_blks (?P&lt;detail_good_blks&gt;\d+)"
+| rex field=asp_detail_msg "bl_total (?P&lt;detail_bl_total&gt;\d+)"
+| rex field=asp_detail_msg "bl_orig (?P&lt;detail_bl_orig&gt;\d+)"
+| rex field=asp_detail_msg "bl_rex (?P&lt;detail_bl_rex&gt;\d+)"
+| rex field=asp_detail_msg "dup_blks (?P&lt;detail_dup_blks&gt;\d+)"
+| rex field=asp_detail_msg "dup_last_blks (?P&lt;detail_dup_last_blks&gt;\d+)"
+| rex field=asp_detail_msg "drop_blks_xnf (?P&lt;detail_drop_blks_xnf&gt;\d+)"
+
+
+| rename COMMENT AS "(detail: good_blks 2139 bl_total 2140 bl_orig 2139 bl_rex 0 dup_blks 0 dup_last_blks 0 drop_blks_xnf 1) (sndr ctl: sent 20 rcvd 19 lost 1 lost 5.00%) (rcvr ctl: sent 37 rcvd 37 lost 0 lost 0.00%) (rex  ctl: sent 0 rcvd 0 lost 0 lost 0.00%) (progress: tx_bytes 3011606 file_bytes 3011606 tx_time 250219) rex_xmit_blks 0  xmit_total 2140 rex_xmit_pct 0.00%"
+
+| eval asp_detail_fx_errors = if(isnull(asp_detail_msg), 1, 0)
+                            + if(isnull(detail_good_blks), 2, 0)
+                            + if(isnull(detail_bl_total), 4, 0)
+                            + if(isnull(detail_bl_orig), 8, 0)
+                            + if(isnull(detail_bl_rex), 16, 0)
+                            + if(isnull(detail_dup_last_blks), 32, 0)
+
+
+  | eval detail_rex_ratio = if ( detail_bl_orig == 0, 0, detail_bl_rex / detail_bl_orig * 100)
+  | eval detail_vldtr_blocks_total = detail_bl_orig + detail_bl_rex - detail_bl_total
+  | eval detail_vldtr_blocks_good  = detail_bl_orig - detail_dup_last_blks - detail_good_blks
+  | eval detail_vldtr_blocks  = detail_vldtr_blocks_total + detail_vldtr_blocks_good
+
+
+
+| rex field=message "\(sndr ctl: (?P&lt;asp_sndr_ctl_msg&gt;(sent (?P&lt;sndr_ctl_sent&gt;\d+) rcvd (?P&lt;sndr_ctl_rcvd&gt;\d+) lost (?P&lt;sndr_ctl_lost&gt;-?\d+) lost (?P&lt;sndr_ctl_lost_pct&gt;-?\d+\.?\d*)\%)|[^\)]+)\)"
+| eval asp_sndr_ctl_fx_errors = if(isnull(asp_sndr_ctl_msg), 1, 0)
+                              + if(isnull(sndr_ctl_sent), 2, 0)
+                              + if(isnull(sndr_ctl_rcvd), 4, 0)
+                              + if(isnull(sndr_ctl_lost), 8, 0)
+                              + if(isnull(sndr_ctl_lost_pct), 16, 0)
+
+| rex field=message "\(rcvr ctl: (?P&lt;asp_rcvr_ctl_msg&gt;(sent (?P&lt;rcvr_ctl_sent&gt;\d+) rcvd (?P&lt;rcvr_ctl_rcvd&gt;\d+) lost (?P&lt;rcvr_ctl_lost&gt;-?\d+) lost (?P&lt;rcvr_ctl_lost_pct&gt;-?\d+\.?\d*)\%)|[^\)]+)\)"
+| eval asp_rcvr_ctl_fx_errors = if(isnull(asp_rcvr_ctl_msg), 1, 0)
+                              + if(isnull(rcvr_ctl_sent), 2, 0)
+                              + if(isnull(rcvr_ctl_rcvd), 4, 0)
+                              + if(isnull(rcvr_ctl_lost), 8, 0)
+                              + if(isnull(rcvr_ctl_lost_pct), 16, 0)
+
+| rex field=message "\(rex\s+ctl: (?P&lt;asp_rex_ctl_msg&gt;(sent (?P&lt;rex_ctl_sent&gt;\d+) rcvd (?P&lt;rex_ctl_rcvd&gt;\d+) lost (?P&lt;rex_ctl_lost&gt;-?\d+) lost (?P&lt;rex_ctl_lost_pct&gt;-?\d+\.?\d*)\%)|[^\)]+)\)"
+| eval asp_rex_ctl_fx_errors  = if(isnull(asp_rex_ctl_msg), 1, 0)
+                              + if(isnull(rex_ctl_sent), 2, 0)
+                              + if(isnull(rex_ctl_rcvd), 4, 0)
+                              + if(isnull(rex_ctl_lost), 8, 0)
+                              + if(isnull(rex_ctl_lost_pct), 16, 0)
+
+| rename COMMENT AS "**** PROGRESS BLOCK ***"
+| rex field=message "\(progress: (?P&lt;asp_progress_msg&gt;[^\)]+?)\)"
+| rex field=asp_progress_msg "tx_bytes (?P&lt;progress_tx_bytes&gt;\d+)"
+| rex field=asp_progress_msg "file_bytes (?P&lt;progress_file_bytes&gt;\d+)"
+| rex field=asp_progress_msg "tx_time (?P&lt;progress_tx_time&gt;\d+)"
+
+| eval asp_progress_fx_errors  = if(isnull(asp_progress_msg), 1, 0)
+                               + if(isnull(progress_tx_bytes), 2, 0)
+                               + if(isnull(progress_file_bytes), 4, 0)
+                               + if(isnull(progress_tx_time), 8, 0)
+
+  | eval progress_tx_time_sec = progress_tx_time / 1000000
+
+
+| rename COMMENT AS "Add'l data; sample: rex_xmit_blks 0  xmit_total 2140 rex_xmit_pct 0.00%"
+| rex field=message "rex_xmit_blks (?P&lt;stats_rex_xmit_blks&gt;\d+)"
+| rex field=message "xmit_total (?P&lt;stats_xmit_total&gt;\d+)"
+| rex field=message "rex_xmit_pct (?P&lt;stats_rex_xmit_pct&gt;-?\d+\.?\d*)"
+
+
+| rex field=message "\(estimate transfer size:\s+(?P&lt;asp_est_trn_size&gt;\d+)\s+bytes\)"
+| rex field=message "sess-\&gt;instru\.num_rex_xfer_not_found\s+(?P&lt;asp_num_rex_xfer_not_found&gt;\d+)"
+| rex field=message "sess-\&gt;instru\.num_rex_abrtxfer_not_found\s+(?P&lt;asp_num_rex_abrtxfer_not_found&gt;\d+)"
+
+| eval asp_fx_errors = asp_fx_errors + asp_detail_fx_errors + asp_sndr_ctl_fx_errors + asp_rcvr_ctl_fx_errors + asp_rex_ctl_fx_errors + asp_progress_fx_errors
+                     + if(isnull(asp_est_trn_size), 1, 0)
+                     + if(isnull(asp_num_rex_xfer_not_found), 1, 0)
+                     + if(isnull(asp_num_rex_abrtxfer_not_found), 1, 0)
+
+
+| stats sparkline AS timeline count AS events
+        dc(id) AS "Session IDs",
+        dc(delay_unit),
+        avg(delay_int), max(delay_int),
+        dc(rex_delay_unit),
+        avg(rex_delay_int), max(rex_delay_int),
+        
+        avg(progress_tx_bytes) AS "avg progress tx bytes", min(progress_tx_bytes) AS "min progress tx bytes", max(progress_tx_bytes) AS "max progress tx bytes",
+        sum(progress_tx_bytes) AS "total progress tx bytes", sparkline(sum(progress_tx_bytes)) AS "total progress tx bytes timeline"
+        avg(progress_file_bytes) AS "avg progress file bytes", min(progress_file_bytes) AS "min progress file bytes", max(progress_file_bytes) AS "max progress file bytes",
+        sum(progress_file_bytes) AS "total progress file bytes",
+        avg(progress_tx_time_sec) AS "avg progress tx time", min(progress_tx_time_sec) AS "min progress tx time", max(progress_tx_time_sec) AS "max progress tx time", sum(progress_tx_time_sec) AS "total progress tx time",
+
+        avg(detail_good_blks) AS "avg good data blocks", min(detail_good_blks) AS "min good data blocks", max(detail_good_blks) AS "max good data blocks", sum(detail_good_blks) AS "sum of good data blocks",
+        avg(detail_bl_total) AS "avg total data blocks", min(detail_bl_total) AS "min total data blocks", max(detail_bl_total) AS "max total data blocks", sum(detail_bl_total) AS "sum of total data blocks",
+        avg(detail_bl_orig) AS "avg original data blocks", min(detail_bl_orig) AS "min original data blocks", max(detail_bl_orig) AS "max original data blocks", sum(detail_bl_orig) AS "sum of original data blocks",
+        avg(detail_bl_rex) AS "avg retransmitted data blocks", min(detail_bl_rex) AS "min retransmitted data blocks", max(detail_bl_rex) AS "max retransmitted data blocks", sum(detail_bl_rex) AS "sum of retransmitted data blocks",
+
+        avg(detail_dup_blks) AS "avg duplicate blocks", min(detail_dup_blks) AS "min duplicate blocks", max(detail_dup_blks) AS "max duplicate blocks", sum(detail_dup_blks) AS "sum of duplicate blocks",
+        
+        avg(detail_dup_last_blks) AS "avg duplicate last blocks", min(detail_dup_last_blks) AS "min duplicate last blocks", max(detail_dup_last_blks) AS "max duplicate last blocks", sum(detail_dup_last_blks) AS "sum of duplicate last blocks",
+        avg(detail_drop_blks_xnf) AS "avg drop_blks_xnf", min(detail_drop_blks_xnf) AS "min drop_blks_xnf", max(detail_drop_blks_xnf) AS "max drop_blks_xnf", sum(detail_drop_blks_xnf) AS "sum of drop_blks_xnf",
+        
+        avg(detail_rex_ratio) AS "avg retransmission ratio", min(detail_rex_ratio) AS "min retransmission ratio", max(detail_rex_ratio) AS "max retransmission ratio",
+        sum(detail_vldtr_blocks) AS "validator (should be zero)"
+
+
+        avg(sndr_ctl_sent) AS "avg sender ctl sent", min(sndr_ctl_sent) AS "min sender ctl sent", max(sndr_ctl_sent) AS "max sender ctl sent", sum(sndr_ctl_sent) AS "total sender ctl sent",
+        avg(sndr_ctl_rcvd) AS "avg sender ctl rcvd", min(sndr_ctl_rcvd) AS "min sender ctl rcvd", max(sndr_ctl_rcvd) AS "max sender ctl rcvd", sum(sndr_ctl_rcvd) AS "total sender ctl rcvd",
+        avg(sndr_ctl_lost) AS "avg sender ctl lost", min(sndr_ctl_lost) AS "min sender ctl lost", max(sndr_ctl_lost) AS "max sender ctl lost", sum(sndr_ctl_lost) AS "total sender ctl lost",
+        avg(sndr_ctl_lost_pct) AS "avg sender ctl lost percent", min(sndr_ctl_lost_pct) AS "min sender ctl lost percent", max(sndr_ctl_lost_pct) AS "max sender ctl lost percent",
+
+        avg(rcvr_ctl_sent) AS "avg rcvr ctl sent", min(rcvr_ctl_sent) AS "min rcvr ctl sent", max(rcvr_ctl_sent) AS "max rcvr ctl sent", sum(rcvr_ctl_sent) AS "total rcvr ctl sent",
+        avg(rcvr_ctl_rcvd) AS "avg rcvr ctl rcvd", min(rcvr_ctl_rcvd) AS "min rcvr ctl rcvd", max(rcvr_ctl_rcvd) AS "max rcvr ctl rcvd", sum(rcvr_ctl_rcvd) AS "total rcvr ctl rcvd",
+        avg(rcvr_ctl_lost) AS "avg rcvr ctl lost", min(rcvr_ctl_lost) AS "min rcvr ctl lost", max(rcvr_ctl_lost) AS "max rcvr ctl lost", sum(rcvr_ctl_lost) AS "total rcvr ctl lost",
+        avg(rcvr_ctl_lost_pct) AS "avg rcvr ctl lost percent", min(rcvr_ctl_lost_pct) AS "min rcvr ctl lost percent", max(rcvr_ctl_lost_pct) AS "max rcvr ctl lost percent",
+
+        avg(rex_ctl_sent) AS "avg rex ctl sent", min(rex_ctl_sent) AS "min rex ctl sent", max(rex_ctl_sent) AS "max rex ctl sent", sum(rex_ctl_sent) AS "total rex ctl sent",
+        avg(rex_ctl_rcvd) AS "avg rex ctl rcvd", min(rex_ctl_rcvd) AS "min rex ctl rcvd", max(rex_ctl_rcvd) AS "max rex ctl rcvd", sum(rex_ctl_rcvd) AS "total rex ctl rcvd",
+        avg(rex_ctl_lost) AS "avg rex ctl lost", min(rex_ctl_lost) AS "min rex ctl lost", max(rex_ctl_lost) AS "max rex ctl lost", sum(rex_ctl_lost) AS "total rex ctl lost",
+        avg(rex_ctl_lost_pct) AS "avg rex ctl lost percent", min(rex_ctl_lost_pct) AS "min rex ctl lost percent", max(rex_ctl_lost_pct) AS "max rex ctl lost percent",
+
+        avg(asp_est_trn_size) AS "avg estimated transfer size", min(asp_est_trn_size) AS "min estimated transfer size", max(asp_est_trn_size) AS "max estimated transfer size"
+
+        avg(stats_rex_xmit_blks) AS "avg stats_rex_xmit_blks", min(stats_rex_xmit_blks) AS "min stats_rex_xmit_blks", max(stats_rex_xmit_blks) AS "max stats_rex_xmit_blks", sum(stats_rex_xmit_blks) AS "sum stats_rex_xmit_blks"
+        avg(stats_xmit_total) AS "avg stats_xmit_total", min(stats_xmit_total) AS "min stats_xmit_total", max(stats_xmit_total) AS "max stats_xmit_total", sum(stats_xmit_total) AS "sum stats_xmit_total"
+        avg(stats_rex_xmit_pct) AS "avg stats_rex_xmit_pct", min(stats_rex_xmit_pct) AS "min stats_rex_xmit_pct", max(stats_rex_xmit_pct) AS "max stats_rex_xmit_pct"
+
+
+
+        sum(asp_fx_errors) AS "field extraction errors"
+        by host, asp_role
+      </query>
+    <earliest>$timeframe.earliest$</earliest>
+    <latest>$timeframe.latest$</latest>
+    <done>
+      <condition>
+        <set token="subsearch_sid">$job.sid$</set>
+      </condition>
+    </done>
+  </search>
+  <fieldset submitButton="false">
+    <input type="time" token="timeframe" searchWhenChanged="true">
+      <label></label>
+      <default>
+        <earliest>-4h@m</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+    <input type="dropdown" token="hosts" searchWhenChanged="true">
+      <label>hosts</label>
+      <choice value="tag::host=&quot;aspera&quot; tag::host=&quot;inbound&quot; sourcetype=&quot;linux_messages_syslog&quot;">Aspera Inbound</choice>
+      <choice value="tag::host=&quot;aspera&quot; tag::host=&quot;outbound&quot; sourcetype=aspera_es">Aspera Outbound</choice>
+      <choice value="NOT tag::host=&quot;aspera&quot;">other</choice>
+      <choice value="">all</choice>
+      <default>tag::host="aspera" tag::host="outbound" sourcetype=aspera_es</default>
+      <prefix>index=aspera (</prefix>
+      <suffix>)</suffix>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Sessions Statistics - key stats</title>
+      <table>
+        <search base="aspera_fasp_stats">
+          <query>| eval "avg data blocks (millions)" = 'avg total data blocks' / 1000000
+| eval "retransmission ratio" = if ( 'avg original data blocks' == 0, 0, 'avg retransmitted data blocks' / 'avg original data blocks' * 100)
+| eval GBph = if('total progress tx time' == 0, 0, ('total progress tx bytes' / (1024*1024*1024)) / ('total progress tx time' / (60*60)))
+| eval "total GB" = 'total progress tx bytes' / (1024*1024*1024)
+| eval "avg GB" = 'avg progress tx bytes' / (1024*1024*1024)
+
+| eventstats sum(GBph) AS sum_GBph
+| eval GBph_pct = if (sum_GBph==0, 0, GBph / sum_GBph * 100)
+
+| table host asp_role timeline events "avg GB"
+    "avg total data blocks",
+    "avg original data blocks",
+    "avg retransmitted data blocks",
+    "retransmission ratio"
+    GBph GBph_pct
+| rename "sum of total data blocks" AS "total data blocks"
+| rename "avg total data blocks" AS "avg total data blocks"
+| rename "sum of original data blocks" AS "original data blocks"
+| rename "avg retransmitted data blocks" AS "avg retransmitted data blocks"
+| rename GBph AS "GB/h"
+| rename GBph_pct AS "GB/h %"
+| rename asp_role AS role</query>
+        </search>
+        <option name="percentagesRow">false</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="totalsRow">true</option>
+        <format type="number" field="avg total data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg original data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg retransmitted data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="retransmission ratio">
+          <option name="unit">%</option>
+        </format>
+        <format type="color" field="avg total data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg original data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg retransmitted data blocks">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="retransmission ratio">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" midColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" maxValue="100" midValue="10" minValue="0"></scale>
+        </format>
+        <format type="number" field="GB/h"></format>
+        <format type="color" field="GB/h">
+          <colorPalette type="minMidMax" maxColor="#FFFFFF" minColor="#FFFF99"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="events">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="events">
+          <colorPalette type="minMidMax" maxColor="#D0F0D0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="total data blocks (millions)"></format>
+        <format type="number" field="total GB">
+          <option name="unit">GB</option>
+        </format>
+        <format type="number" field="avg GB">
+          <option name="unit">GB</option>
+        </format>
+        <format type="color" field="total GB">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg GB">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="GB/h %">
+          <option name="precision">1</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="color" field="GB/h %">
+          <colorPalette type="minMidMax" maxColor="#53A051" midColor="#FFFFFF" minColor="#F1813F"></colorPalette>
+          <scale type="minMidMax" maxValue="100" midValue="50" minValue="0"></scale>
+        </format>
+        <format type="color" field="role">
+          <colorPalette type="sharedList"></colorPalette>
+          <scale type="sharedCategory"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>retransmitted blocks per host</title>
+      <chart>
+        <search>
+          <query>$hosts$ "FASP Session Statistics"
+| rex "(?P&lt;hostname&gt;\S+)\s+(?P&lt;process&gt;\w+)\[(?P&lt;pid&gt;\d+)\]:\s+(?P&lt;asp_FASP_payload&gt;LOG .*)$"
+| eval message = if( isnull(message), asp_FASP_payload, message)
+
+| rex field=message "^(?P&lt;asp_log_type&gt;LOG FASP Session Statistics \[(?P&lt;asp_role&gt;[^\]]+)\])"
+
+| rex field=message "ave_xmit_rate\s+(?P&lt;avg_xmit_rate&gt;\S+)\s"
+
+| rename COMMENT AS "**** DETAIL BLOCK ***"
+| rex field=message "\(detail: (?P&lt;asp_detail_msg&gt;[^\)]+?)\)"
+| rex field=asp_detail_msg "good_blks (?P&lt;detail_good_blks&gt;\d+)"
+| rex field=asp_detail_msg "bl_total (?P&lt;detail_bl_total&gt;\d+)"
+| rex field=asp_detail_msg "bl_orig (?P&lt;detail_bl_orig&gt;\d+)"
+| rex field=asp_detail_msg "bl_rex (?P&lt;detail_bl_rex&gt;\d+)"
+| rex field=asp_detail_msg "dup_blks (?P&lt;detail_dup_blks&gt;\d+)"
+| rex field=asp_detail_msg "dup_last_blks (?P&lt;detail_dup_last_blks&gt;\d+)"
+| rex field=asp_detail_msg "drop_blks_xnf (?P&lt;detail_drop_blks_xnf&gt;\d+)"
+
+
+| rex field=delay "^(?&lt;delay_int&gt;-?\d+)\s*(?P&lt;delay_unit&gt;\S+)$$"
+| rex field=rex_delay "^(?&lt;rex_delay_int&gt;-?\d+)\s*(?P&lt;rex_delay_unit&gt;\S+)$$"
+
+
+  | eval detail_rex_ratio = if ( detail_bl_orig == 0, 0, detail_bl_rex / detail_bl_orig * 100)
+  | eval detail_vldtr_blocks_total = detail_bl_orig + detail_bl_rex - detail_bl_total
+  | eval detail_vldtr_blocks_good  = detail_bl_orig - detail_dup_last_blks - detail_good_blks
+  | eval detail_vldtr_blocks  = detail_vldtr_blocks_total + detail_vldtr_blocks_good
+
+
+| rex field=message "\(progress: (?P&lt;asp_progress_msg&gt;(tx_bytes (?P&lt;progress_tx_bytes&gt;\d+) file_bytes (?P&lt;progress_file_bytes&gt;\d+) tx_time (?P&lt;progress_tx_time&gt;\d+))|[^\)]+)\)"
+
+| eval progress_tx_time_sec = progress_tx_time / 1000000
+
+
+| rex field=message "\(estimate transfer size:\s+(?P&lt;asp_est_trn_size&gt;\d+)\s+bytes\)"
+
+| timechart 
+        avg(detail_bl_rex) AS "avg retransmitted data blocks",
+        by host</query>
+          <earliest>$timeframe.earliest$</earliest>
+          <latest>$timeframe.latest$</latest>
+          <sampleRatio>1</sampleRatio>
+        </search>
+        <option name="charting.axisLabelsX.majorLabelStyle.overflowMode">ellipsisNone</option>
+        <option name="charting.axisLabelsX.majorLabelStyle.rotation">0</option>
+        <option name="charting.axisTitleX.visibility">visible</option>
+        <option name="charting.axisTitleY.visibility">visible</option>
+        <option name="charting.axisTitleY2.visibility">visible</option>
+        <option name="charting.axisX.abbreviation">none</option>
+        <option name="charting.axisX.scale">linear</option>
+        <option name="charting.axisY.abbreviation">none</option>
+        <option name="charting.axisY.scale">linear</option>
+        <option name="charting.axisY2.abbreviation">none</option>
+        <option name="charting.axisY2.enabled">0</option>
+        <option name="charting.axisY2.scale">inherit</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.bubbleMaximumSize">50</option>
+        <option name="charting.chart.bubbleMinimumSize">10</option>
+        <option name="charting.chart.bubbleSizeBy">area</option>
+        <option name="charting.chart.nullValueMode">gaps</option>
+        <option name="charting.chart.showDataLabels">none</option>
+        <option name="charting.chart.sliceCollapsingThreshold">0.01</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.chart.style">minimal</option>
+        <option name="charting.drilldown">none</option>
+        <option name="charting.layout.splitSeries">0</option>
+        <option name="charting.layout.splitSeries.allowIndependentYRanges">0</option>
+        <option name="charting.legend.labelStyle.overflowMode">ellipsisMiddle</option>
+        <option name="charting.legend.mode">standard</option>
+        <option name="charting.legend.placement">right</option>
+        <option name="charting.lineWidth">2</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="trellis.enabled">0</option>
+        <option name="trellis.scales.shared">1</option>
+        <option name="trellis.size">medium</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Sessions Statistics - progress bytes</title>
+      <table>
+        <search base="aspera_fasp_stats">
+          <query>| eval Mbps = if('total progress tx time' == 0, 0, 'total progress tx bytes' / 'total progress tx time' / (1024*1024))
+  | eval "total GB" = 'total progress tx bytes' / (1024*1024*1024)
+  | eval GBph = if('total progress tx time' == 0, 0, ('total progress tx bytes' / (1024*1024*1024)) / ('total progress tx time' / (60*60)))
+  | table host
+        "avg progress tx bytes" "min progress tx bytes" "max progress tx bytes" "total progress tx bytes" "total GB"
+        "avg progress file bytes" "min progress file bytes" "max progress file bytes" "total progress file bytes",
+        "avg progress tx time" "min progress tx time" "max progress tx time" "total progress tx time"
+        Mbps GBph
+  | rename GBph AS "GBytes per hour"</query>
+        </search>
+        <option name="refresh.display">progressbar</option>
+        <option name="totalsRow">true</option>
+        <format type="number" field="avg progress tx bytes"></format>
+        <format type="number" field="max progress tx bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="min progress tx bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg progress file bytes"></format>
+        <format type="number" field="min progress file bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="max progress file bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg progress tx time">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="max progress tx time">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="avg progress tx time">
+          <colorPalette type="minMidMax" maxColor="#D0D0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="min progress tx time">
+          <colorPalette type="minMidMax" maxColor="#80D0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max progress tx time">
+          <colorPalette type="minMidMax" maxColor="#D0D0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="total progress tx bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="total progress file bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="total progress tx time">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="avg progress tx bytes">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max progress tx bytes">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="total progress tx bytes">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max progress file bytes">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="total progress tx time">
+          <colorPalette type="minMidMax" maxColor="#D0D0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="total progress file bytes">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg progress file bytes">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="min progress tx time">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="Mbps"></format>
+        <format type="color" field="Mbps">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="GBytes per hour"></format>
+        <format type="color" field="GBytes per hour">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="total GB"></format>
+        <format type="color" field="total GB">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Sessions Statistics - data blocks</title>
+      <table>
+        <search base="aspera_fasp_stats">
+          <query>| table host
+            "avg good data blocks", "min good data blocks", "max good data blocks", "sum of good data blocks",
+            "avg total data blocks", "min total data blocks", "max total data blocks", "sum of total data blocks",
+            "avg original data blocks", "min original data blocks", "max original data blocks", "sum of original data blocks",
+            "avg retransmitted data blocks", "min retransmitted data blocks", "max retransmitted data blocks", "sum of retransmitted data blocks"
+            "avg duplicate last blocks", "min duplicate last blocks", "max duplicate last blocks", "sum of duplicate last blocks"
+            
+            "avg retransmission ratio", "min retransmission ratio", "max retransmission ratio"
+            "validator (should be zero)"</query>
+        </search>
+        <format type="number" field="avg good data blocks"></format>
+        <format type="number" field="max good data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg total data blocks"></format>
+        <format type="number" field="max total data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg original data blocks"></format>
+        <format type="number" field="max original data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg retransmitted data blocks"></format>
+        <format type="number" field="max retransmitted data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg duplicate last blocks"></format>
+        <format type="color" field="avg good data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg total data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg original data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg retransmitted data blocks">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg duplicate last blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max good data blocks">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max total data blocks">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max original data blocks">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max retransmitted data blocks">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="max duplicate last blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="max duplicate last blocks">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="sum of good data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="sum of total data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="sum of original data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="sum of retransmitted data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg retransmission ratio">
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="min retransmission ratio">
+          <option name="precision">0</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="max retransmission ratio">
+          <option name="precision">0</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="color" field="sum of retransmitted data blocks">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg retransmission ratio">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" midColor="#F0E0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" maxValue="100" midValue="10" minValue="0"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Sessions Statistics - sender ctl</title>
+      <table>
+        <search base="aspera_fasp_stats">
+          <query>
+            | table host
+        "avg sender ctl sent", "min sender ctl sent", "max sender ctl sent", "total sender ctl sent",
+        "avg sender ctl rcvd", "min sender ctl rcvd", "max sender ctl rcvd", "total sender ctl rcvd",
+        "avg sender ctl lost", "min sender ctl lost", "max sender ctl lost", "total sender ctl lost",
+        "avg sender ctl lost percent", "min sender ctl lost percent", "max sender ctl lost percent"
+
+
+          </query>
+        </search>
+        <format type="number" field="avg sender ctl sent"></format>
+        <format type="number" field="max sender ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg sender ctl rcvd"></format>
+        <format type="number" field="max sender ctl rcvd">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg sender ctl lost"></format>
+        <format type="number" field="max sender ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg sender ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="min sender ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="max sender ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="color" field="avg sender ctl sent">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg sender ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg sender ctl lost">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" midColor="#FFFFFF" minColor="#F8BE34"></colorPalette>
+          <scale type="minMidMax" midValue="0"></scale>
+        </format>
+        <format type="color" field="avg sender ctl lost percent">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" maxValue="100" minValue="0"></scale>
+        </format>
+        <format type="color" field="max sender ctl sent">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max sender ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="total sender ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="total sender ctl sent">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="total sender ctl rcvd">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="total sender ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="total sender ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="total sender ctl lost">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" midColor="#FFFFFF" minColor="#F8BE34"></colorPalette>
+          <scale type="minMidMax" midValue="0"></scale>
+        </format>
+        <format type="color" field="max sender ctl lost">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="min sender ctl lost">
+          <colorPalette type="minMidMax" maxColor="#FFE0E0" midColor="#FFFFFF" minColor="#F0F0C0"></colorPalette>
+          <scale type="minMidMax" midValue="0"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Sessions Statistics - receiver ctl</title>
+      <table>
+        <search base="aspera_fasp_stats">
+          <query>
+            | table host
+        "avg rcvr ctl sent", "min rcvr ctl sent", "max rcvr ctl sent", "total rcvr ctl sent",
+        "avg rcvr ctl rcvd", "min rcvr ctl rcvd", "max rcvr ctl rcvd", "total rcvr ctl rcvd",
+        "avg rcvr ctl lost", "min rcvr ctl lost", "max rcvr ctl lost", "total rcvr ctl lost",
+        "avg rcvr ctl lost percent", "min rcvr ctl lost percent", "max rcvr ctl lost percent",
+
+
+          </query>
+        </search>
+        <format type="number" field="max rcvr ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="total rcvr ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="total rcvr ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="max rcvr ctl rcvd">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="total rcvr ctl rcvd">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="max rcvr ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rcvr ctl sent"></format>
+        <format type="number" field="max rcvr ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rcvr ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="min rcvr ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="max rcvr ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="color" field="avg rcvr ctl sent">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="total rcvr ctl sent">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg rcvr ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="total rcvr ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg rcvr ctl lost">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" midColor="#FFFFFF" minColor="#F8BE34"></colorPalette>
+          <scale type="minMidMax" midValue="0"></scale>
+        </format>
+        <format type="number" field="min rcvr ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rcvr ctl rcvd"></format>
+        <format type="number" field="avg rcvr ctl lost"></format>
+        <format type="color" field="min rcvr ctl lost">
+          <colorPalette type="minMidMax" maxColor="#FFE0E0" midColor="#FFFFFF" minColor="#F0F0C0"></colorPalette>
+          <scale type="minMidMax" midValue="0"></scale>
+        </format>
+        <format type="color" field="total rcvr ctl lost">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" midColor="#FFFFFF" minColor="#F8BE34"></colorPalette>
+          <scale type="minMidMax" midValue="0"></scale>
+        </format>
+        <format type="color" field="avg rcvr ctl lost percent">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" maxValue="100" minValue="0"></scale>
+        </format>
+        <format type="color" field="max rcvr ctl sent">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max rcvr ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Sessions Statistics - rex ctl</title>
+      <table>
+        <search base="aspera_fasp_stats">
+          <query>
+            | table host
+        "avg rex ctl sent", "min rex ctl sent", "max rex ctl sent", "total rex ctl sent",
+        "avg rex ctl rcvd", "min rex ctl rcvd", "max rex ctl rcvd", "total rex ctl rcvd",
+        "avg rex ctl lost", "min rex ctl lost", "max rex ctl lost", "total rex ctl lost",
+        "avg rex ctl lost percent", "min rex ctl lost percent", "max rex ctl lost percent"
+
+
+          </query>
+        </search>
+        <format type="number" field="max rex ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="total rex ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="total rex ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="max rex ctl rcvd">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="total rex ctl rcvd">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="max rex ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rex ctl sent"></format>
+        <format type="number" field="max rex ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rex ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="min rex ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="max rex ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="color" field="avg rex ctl sent">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="total rex ctl sent">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg rex ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="total rex ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg rex ctl lost">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" midColor="#FFFFFF" minColor="#F8BE34"></colorPalette>
+          <scale type="minMidMax" midValue="0"></scale>
+        </format>
+        <format type="number" field="min rex ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rex ctl rcvd"></format>
+        <format type="number" field="avg rex ctl lost"></format>
+        <format type="color" field="min rex ctl lost">
+          <colorPalette type="minMidMax" maxColor="#FFE0E0" midColor="#FFFFFF" minColor="#F0F0C0"></colorPalette>
+          <scale type="minMidMax" midValue="0"></scale>
+        </format>
+        <format type="color" field="total rex ctl lost">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" midColor="#FFFFFF" minColor="#F8BE34"></colorPalette>
+          <scale type="minMidMax" midValue="0"></scale>
+        </format>
+        <format type="color" field="avg rex ctl lost percent">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" maxValue="100" minValue="0"></scale>
+        </format>
+        <format type="color" field="max rex ctl sent">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max rex ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#E0F0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>event stats</title>
+      <table>
+        <title>event stats and data validation errors (if any)</title>
+        <search base="aspera_fasp_stats">
+          <query>| table host asp_role sparkline events "Session IDs" "field extraction errors"</query>
+        </search>
+        <option name="refresh.display">progressbar</option>
+        <format type="number" field="Session IDs">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="events">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="field extraction errors">
+          <colorPalette type="list">[#D0F0D0,#DC4E41]</colorPalette>
+          <scale type="threshold">1e-7</scale>
+        </format>
+        <format type="color" field="events">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="Session IDs">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Sessions Statistics - data blocks - totals</title>
+      <table>
+        <search base="aspera_fasp_stats">
+          <query>| eval good_blocks = 'sum of original data blocks' - 'sum of duplicate last blocks'
+            | eval total_blocks = 'sum of original data blocks' + 'sum of retransmitted data blocks'
+            | eval "validator: total blocks (should be zero)" = total_blocks - 'sum of total data blocks'
+            | eval "validator: good blocks (should be zero)" = good_blocks - 'sum of good data blocks'
+            
+            | eval "retransmission ratio" = if ( 'sum of original data blocks' == 0, 0, 'sum of retransmitted data blocks' / 'sum of original data blocks' * 100)
+            
+            | table host events
+            "sum of good data blocks",
+            "sum of total data blocks",
+            "sum of original data blocks",
+            "sum of retransmitted data blocks",
+            "sum of duplicate last blocks",
+            "retransmission ratio"
+            "validator: good blocks (should be zero)",
+            "validator: total blocks (should be zero)"</query>
+        </search>
+        <option name="percentagesRow">false</option>
+        <option name="totalsRow">true</option>
+        <format type="number" field="sum of good data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="sum of total data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="sum of original data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="sum of retransmitted data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="validator: good blocks (should be zero)">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="validator: total blocks (should be zero)">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="retransmission ratio">
+          <option name="unit">%</option>
+        </format>
+        <format type="color" field="sum of good data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="sum of total data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="sum of original data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="sum of retransmitted data blocks">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="sum of duplicate last blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="retransmission ratio">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" midColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" maxValue="100" midValue="10" minValue="0"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Sessions Statistics - data blocks - averages</title>
+      <table>
+        <search base="aspera_fasp_stats">
+          <query>| eval blocks_good_avg = 'avg original data blocks' - 'avg duplicate last blocks'
+            | eval blocks_total_avg = 'avg original data blocks' + 'avg retransmitted data blocks'
+            | eval "validator: avg total blocks (should be zero)" = blocks_total_avg - 'avg total data blocks'
+            | eval "validator: avg good blocks (should be zero)" = blocks_good_avg - 'avg good data blocks'
+
+            | eval "retransmission ratio" = if ( 'avg original data blocks' == 0, 0, 'avg retransmitted data blocks' / 'avg original data blocks' * 100)
+            
+| table host events
+            "avg good data blocks",
+            "avg total data blocks",
+            "avg original data blocks",
+            "avg retransmitted data blocks",
+            "avg duplicate last blocks"
+            "retransmission ratio"
+            "validator: avg total blocks (should be zero)"
+            "validator: avg good blocks (should be zero)"</query>
+        </search>
+        <format type="number" field="avg good data blocks"></format>
+        <format type="number" field="max good data blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg total data blocks"></format>
+        <format type="number" field="avg original data blocks"></format>
+        <format type="number" field="avg retransmitted data blocks"></format>
+        <format type="number" field="avg duplicate last blocks"></format>
+        <format type="color" field="avg good data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg total data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg original data blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg retransmitted data blocks">
+          <colorPalette type="minMidMax" maxColor="#FFFF99" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg duplicate last blocks">
+          <colorPalette type="minMidMax" maxColor="#B0E0F0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="validator: avg total blocks (should be zero)">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="validator: avg good blocks (should be zero)">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="retransmission ratio">
+          <option name="unit">%</option>
+        </format>
+        <format type="color" field="retransmission ratio">
+          <colorPalette type="minMidMax" maxColor="#DC4E41" midColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" maxValue="100" midValue="10" minValue="0"></scale>
+        </format>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Sessions Statistics - everything</title>
+      <table>
+        <search base="aspera_fasp_stats">
+          <query>
+            | rename COMMENT AS "this does nothing; see base search"
+          </query>
+        </search>
+        <option name="count">20</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">none</option>
+        <option name="percentagesRow">false</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="totalsRow">false</option>
+        <option name="wrap">true</option>
+        <format type="number" field="tx_bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="file_bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="tx_time">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg(delay_int)"></format>
+        <format type="number" field="avg(rex_delay_int)"></format>
+        <format type="number" field="avg(detail_good_blks)"></format>
+        <format type="number" field="max(delay_int)">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="max(detail_good_blks)">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg(detail_bl_total)"></format>
+        <format type="number" field="max(detail_bl_total)">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg(detail_bl_orig)"></format>
+        <format type="number" field="max(detail_bl_orig)">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg(detail_bl_rex)"></format>
+        <format type="number" field="max(detail_bl_rex)"></format>
+        <format type="number" field="avg(detail_dup_last_blks)"></format>
+        <format type="number" field="events">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="Session IDs">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="dc(delay_unit)">
+          <colorPalette type="list">[#D0F0D0,#DC4E41]</colorPalette>
+          <scale type="threshold">1.0001</scale>
+        </format>
+        <format type="color" field="dc(rex_delay_unit)">
+          <colorPalette type="list">[#D0F0D0,#DC4E41]</colorPalette>
+          <scale type="threshold">1.0001</scale>
+        </format>
+        <format type="color" field="avg(detail_bl_rex)">
+          <colorPalette type="minMidMax" maxColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="max(detail_bl_rex)">
+          <colorPalette type="minMidMax" maxColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg(delay_int)">
+          <colorPalette type="minMidMax" maxColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg(rex_delay_int)">
+          <colorPalette type="minMidMax" maxColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg(detail_good_blks)">
+          <colorPalette type="minMidMax" maxColor="#D0F0D0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="max(rex_delay_int)">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg good blocks"></format>
+        <format type="number" field="max good blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg total blocks"></format>
+        <format type="number" field="max total blocks">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="avg good blocks">
+          <colorPalette type="minMidMax" maxColor="#FFFFFF" minColor="#FFA0A0"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg total blocks">
+          <colorPalette type="minMidMax" maxColor="#FFFFFF" minColor="#FFA0A0"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="number" field="avg sender ctl sent"></format>
+        <format type="number" field="max sender ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg sender ctl rcvd"></format>
+        <format type="number" field="max sender ctl rcvd">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg sender ctl lost"></format>
+        <format type="number" field="max sender ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg sender ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="max sender ctl lost  percent">
+          <option name="precision">0</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="min sender ctl lost percent">
+          <option name="precision">0</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="avg rcvr ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="max rcvr ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rcvr ctl rcvd"></format>
+        <format type="number" field="max rcvr ctl rcvd">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rcvr ctl lost">
+          <option name="precision">1</option>
+        </format>
+        <format type="number" field="min rcvr ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="max rcvr ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rcvr ctl lost percent">
+          <option name="precision">1</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="min rcvr ctl lost percent">
+          <option name="precision">1</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="max rcvr ctl lost  percent">
+          <option name="precision">1</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="max rcvr ctl lost percent">
+          <option name="precision">1</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="avg rex ctl sent"></format>
+        <format type="number" field="max rex ctl sent">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rex ctl rcvd"></format>
+        <format type="number" field="max rex ctl rcvd">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rex ctl lost"></format>
+        <format type="number" field="min rex ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="max rex ctl lost">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg rex ctl lost percent">
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="min rex ctl lost percent">
+          <option name="precision">1</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="max rex ctl lost percent">
+          <option name="precision">1</option>
+          <option name="unit">%</option>
+        </format>
+        <format type="number" field="avg progress tx bytes"></format>
+        <format type="number" field="max progress tx bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg progress file bytes"></format>
+        <format type="number" field="max progress file bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg progress tx time"></format>
+        <format type="number" field="max progress tx time">
+          <option name="precision">0</option>
+        </format>
+        <format type="color" field="avg sender ctl lost">
+          <colorPalette type="minMidMax" maxColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg sender ctl lost percent">
+          <colorPalette type="minMidMax" maxColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg rcvr ctl sent">
+          <colorPalette type="minMidMax" maxColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg rcvr ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg rcvr ctl lost">
+          <colorPalette type="minMidMax" maxColor="#F8BE34" midColor="#FFFFFF" minColor="#FFA0A0"></colorPalette>
+          <scale type="minMidMax" midType="percentile" midValue="50"></scale>
+        </format>
+        <format type="color" field="avg rex ctl sent">
+          <colorPalette type="minMidMax" maxColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax" minValue="0"></scale>
+        </format>
+        <format type="color" field="avg rex ctl rcvd">
+          <colorPalette type="minMidMax" maxColor="#FFA0A0" minColor="#FFFFFF"></colorPalette>
+          <scale type="minMidMax"></scale>
+        </format>
+        <format type="color" field="avg rex ctl lost">
+          <colorPalette type="minMidMax" maxColor="#F8BE34" midColor="#FFFFFF" minColor="#FFA0A0"></colorPalette>
+          <scale type="minMidMax" midType="percentile" midValue="50"></scale>
+        </format>
+        <format type="number" field="total progress tx bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="total progress file bytes">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="total progress tx time">
+          <option name="precision">0</option>
+        </format>
+        <format type="number" field="avg good data blocks"></format>
+        <format type="number" field="max good data blocks">
+          <option name="precision">0</option>
+        </format>
+      </table>
+    </panel>
+  </row>
+</form>
